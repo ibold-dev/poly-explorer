@@ -324,11 +324,13 @@ export default function TradesExplorer({
             >
               <div className="flex items-center gap-1.5 sm:gap-3 min-w-0">
                 <span
-                  className={`text-[10px] shrink-0 transition-transform ${
+                  className={`shrink-0 transition-transform ${
                     expandedGroups.has(group.label) ? "rotate-90" : ""
                   }`}
                 >
-                  ▶
+                  <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M6 4l4 4-4 4" />
+                  </svg>
                 </span>
                 <span className="text-xs font-medium text-foreground truncate">
                   {group.label}
