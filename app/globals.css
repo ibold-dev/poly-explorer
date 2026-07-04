@@ -12,20 +12,6 @@
   --loss: #ef4444;
 }
 
-@media (prefers-color-scheme: light) {
-  :root {
-    --background: #fafafa;
-    --foreground: #09090b;
-    --card: #ffffff;
-    --card-hover: #f4f4f5;
-    --border: #e4e4e7;
-    --muted: #71717a;
-    --accent: #2563eb;
-    --profit: #16a34a;
-    --loss: #dc2626;
-  }
-}
-
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
