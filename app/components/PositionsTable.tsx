@@ -49,6 +49,7 @@ export default function PositionsTable(props: Props) {
               <td className="py-2 pr-4 max-w-[120px] sm:max-w-[200px]">
                 <Link
                   href={`/markets/${pos.conditionId}`}
+                  title={pos.title ?? "Unknown"}
                   className="text-accent hover:underline truncate block"
                 >
                   {pos.title ?? "Unknown"}

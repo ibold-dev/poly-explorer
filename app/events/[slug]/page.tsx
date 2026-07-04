@@ -94,7 +94,7 @@ export default async function EventPage({ params }: Props) {
           return (
             <Link
               key={market.id ?? market.conditionId}
-              href={`/markets/${market.conditionId ?? market.id}`}
+              href={`/markets/${market.id}`}
               className="block rounded-lg border border-border bg-card p-4 transition-colors hover:bg-card-hover"
             >
               <h3 className="mb-2 text-sm font-medium text-foreground">

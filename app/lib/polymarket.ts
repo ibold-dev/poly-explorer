@@ -56,7 +56,17 @@ export const getMarkets = cache(
 
 export const getMarket = cache((id: string) =>
   unstable_cache(
-    async () => client.markets.getMarket(id),
+    async () => {
+      try {
+        return await client.markets.getMarket(id);
+      } catch {
+        const result = await client.markets.getMarketsKeyset({
+          condition_ids: [id],
+          limit: 1,
+        });
+        return result.markets?.[0] ?? null;
+      }
+    },
     ['market', id],
     { revalidate: 30, tags: ['market', id] }
   )()

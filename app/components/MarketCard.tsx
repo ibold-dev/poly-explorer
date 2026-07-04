@@ -13,7 +13,7 @@ export default function MarketCard({ market }: MarketCardProps) {
 
   return (
     <Link
-      href={`/markets/${market.conditionId ?? market.id}`}
+      href={`/markets/${market.id}`}
       className="group block rounded-lg border border-border bg-card p-4 transition-colors hover:bg-card-hover"
     >
       <h3 className="mb-2 text-sm font-medium text-foreground group-hover:text-accent transition-colors line-clamp-2">
