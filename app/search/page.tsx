@@ -1,8 +1,10 @@
 import { notFound } from "next/navigation";
 import type { Metadata } from "next";
-import { search } from "../lib/polymarket";
+import { search, getProfile } from "../lib/polymarket";
 import Link from "next/link";
 import { truncateAddress } from "../lib/format";
+
+const ADDRESS_RE = /^0x[a-fA-F0-9]{40}$/;
 
 interface Props {
   searchParams: Promise<{ q?: string }>;
@@ -22,16 +24,41 @@ export default async function SearchPage({ searchParams }: Props) {
   if (!q || !q.trim()) notFound();
 
   const trimmed = q.trim();
-  const results = await search({ q: trimmed, limit_per_type: 10 }).catch(
-    () => null
-  );
-  if (!results) notFound();
 
-  const events = results.events ?? [];
-  const profiles = results.profiles ?? [];
-  const tags = results.tags ?? [];
+  const [results, addressProfile] = await Promise.all([
+    search({
+      q: trimmed,
+      limit_per_type: 50,
+      search_profiles: true,
+      search_tags: true,
+    }).catch(() => null),
+    ADDRESS_RE.test(trimmed)
+      ? getProfile(trimmed.toLowerCase()).catch(() => null)
+      : null,
+  ]);
+
+  if (!results && !addressProfile) notFound();
+
+  const events = results?.events ?? [];
+  const profiles = results?.profiles ?? [];
+  const tags = results?.tags ?? [];
+
+  if (addressProfile) {
+    const alreadyListed = profiles.some(
+      (p) => p.proxyWallet?.toLowerCase() === trimmed.toLowerCase()
+    );
+    if (!alreadyListed) {
+      profiles.unshift({
+        proxyWallet: trimmed.toLowerCase(),
+        name: addressProfile.name,
+        pseudonym: addressProfile.pseudonym,
+        profileImage: addressProfile.profileImage,
+      } as any);
+    }
+  }
 
   const total = events.length + profiles.length + tags.length;
+  const totalResults = results?.pagination?.totalResults ?? total;
 
   return (
     <div className="mx-auto max-w-4xl px-4 py-8">
@@ -39,8 +66,7 @@ export default async function SearchPage({ searchParams }: Props) {
         Search results for &ldquo;{trimmed}&rdquo;
       </h1>
       <p className="mb-6 text-xs text-muted">
-        {results.pagination?.totalResults ?? total} result
-        {(results.pagination?.totalResults ?? total) !== 1 ? "s" : ""}
+        {totalResults} result{totalResults !== 1 ? "s" : ""}
       </p>
 
       {total === 0 && (
