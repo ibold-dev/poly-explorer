@@ -18,7 +18,7 @@ export default function HomePage() {
 
       <Suspense
         fallback={
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-3">
             {Array.from({ length: 6 }).map((_, i) => (
               <Skeleton key={i} className="h-40 rounded-lg" />
             ))}
@@ -30,7 +30,7 @@ export default function HomePage() {
 
       <Suspense
         fallback={
-          <div className="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          <div className="mt-8 grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-3">
             {Array.from({ length: 6 }).map((_, i) => (
               <Skeleton key={i} className="h-32 rounded-lg" />
             ))}
@@ -66,7 +66,7 @@ async function FeaturedEvents() {
   return (
     <section>
       <h2 className="mb-4 text-lg font-semibold">Events</h2>
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+      <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-3">
         {events.map((event) => (
           <EventCard key={event.id ?? event.slug} event={event} />
         ))}
@@ -95,7 +95,7 @@ async function TopMarkets() {
   return (
     <section className="mt-8">
       <h2 className="mb-4 text-lg font-semibold">Markets</h2>
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+      <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-3">
         {markets.map((market) => (
           <MarketCard key={market.id ?? market.conditionId} market={market} />
         ))}

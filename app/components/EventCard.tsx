@@ -13,7 +13,7 @@ export default function EventCard({ event }: EventCardProps) {
   return (
     <Link
       href={`/events/${event.slug ?? event.id}`}
-      className="group block rounded-lg border border-border bg-card p-4 transition-colors hover:bg-card-hover"
+      className="group block rounded-lg border border-border bg-card p-3 sm:p-4 transition-colors hover:bg-card-hover"
     >
       <div className="mb-2 flex items-start gap-3">
         {event.image && (
@@ -35,7 +35,7 @@ export default function EventCard({ event }: EventCardProps) {
         </div>
       </div>
 
-      <div className="flex items-center gap-4 text-xs text-muted">
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted">
         <span>{marketCount} market{marketCount !== 1 ? "s" : ""}</span>
         {event.volume != null && (
           <span>{formatUsdCompact(event.volume)} vol</span>
