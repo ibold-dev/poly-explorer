@@ -2,18 +2,19 @@
 
 import { useState, useMemo, useCallback, useRef } from "react";
 import type { Trade } from "polymarket-client-ts";
-import { formatUsd, formatPnl, formatDateTime } from "../lib/format";
+import { formatUsd, formatUsdCompact, formatPnl, formatDateTime } from "../lib/format";
 
 type GroupBy = "minute" | "hour" | "day" | "week" | "month" | "year";
 type Side = "ALL" | "BUY" | "SELL";
+type AssetCategory = "ALL" | "BTC" | "ETH" | "SOL" | "XRP" | "GENERAL";
+type PeriodDuration = "ALL" | "5m" | "15m" | "1hr" | "GENERAL";
+type ViewLevel = "assets" | "periods" | "months" | "days" | "slots" | "trades";
 
-interface TradeGroup {
+interface TimeSlot {
+  key: string;
   label: string;
-  timestamp: number;
-  tradeCount: number;
-  totalVolume: number;
-  netPnl: number;
-  trades: Trade[];
+  startHour: number;
+  startMin: number;
 }
 
 interface TradesExplorerProps {
@@ -21,65 +22,90 @@ interface TradesExplorerProps {
   userAddress: string;
 }
 
-const PAGE_SIZE = 100;
+const PAGE_SIZE = 50;
 const BATCH_SIZE = 5000;
 
-function getGroupKey(timestamp: number, groupBy: GroupBy): string {
-  const d = new Date(timestamp * 1000);
-  switch (groupBy) {
-    case "minute":
-      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}T${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
-    case "hour":
-      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}T${String(d.getHours()).padStart(2, "0")}:00`;
-    case "day":
-      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-    case "week": {
-      const startOfWeek = new Date(d);
-      startOfWeek.setDate(d.getDate() - d.getDay());
-      return `${startOfWeek.getFullYear()}-${String(startOfWeek.getMonth() + 1).padStart(2, "0")}-${String(startOfWeek.getDate()).padStart(2, "0")}`;
-    }
-    case "month":
-      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
-    case "year":
-      return `${d.getFullYear()}`;
-  }
+// Helper to classify cryptocurrency/asset from title/slug
+function extractCryptocurrency(title?: string, slug?: string): AssetCategory {
+  const text = `${title ?? ""} ${slug ?? ""}`.toLowerCase();
+  if (text.includes("bitcoin") || text.includes("btc")) return "BTC";
+  if (text.includes("ethereum") || text.includes("eth")) return "ETH";
+  if (text.includes("solana") || text.includes("sol")) return "SOL";
+  if (text.includes("ripple") || text.includes("xrp")) return "XRP";
+  return "GENERAL";
 }
 
-function groupTrades(trades: Trade[], groupBy: GroupBy): TradeGroup[] {
-  const groups = new Map<string, Trade[]>();
+// Helper to classify period duration from event slug
+function extractPeriodDuration(slug?: string): PeriodDuration {
+  if (!slug) return "GENERAL";
+  const slugLower = slug.toLowerCase();
+  if (slugLower.includes("15m") || slugLower.includes("-15m-")) return "15m";
+  if (slugLower.includes("5m") || slugLower.includes("-5m-")) return "5m";
+  if (
+    slugLower.includes("1hr") ||
+    slugLower.includes("1h") ||
+    slugLower.includes("up-or-down") ||
+    slugLower.includes("updown")
+  ) {
+    return "1hr";
+  }
+  return "GENERAL";
+}
 
-  for (const trade of trades) {
-    if (trade.timestamp == null) continue;
-    const key = getGroupKey(trade.timestamp, groupBy);
-    const existing = groups.get(key);
-    if (existing) {
-      existing.push(trade);
-    } else {
-      groups.set(key, [trade]);
-    }
+// Helpers for human dates
+function formatHumanMonth(monthStr: string): string {
+  const parts = monthStr.split("-");
+  if (parts.length !== 2) return monthStr;
+  const year = parts[0];
+  const monthIdx = parseInt(parts[1], 10) - 1;
+  const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  return `${months[monthIdx]} ${year}`;
+}
+
+function formatHumanDate(dateStr: string): string {
+  const parts = dateStr.split("-");
+  if (parts.length !== 3) return dateStr;
+  const year = parts[0];
+  const monthIdx = parseInt(parts[1], 10) - 1;
+  const day = parseInt(parts[2], 10);
+  const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  return `${day} ${months[monthIdx]} ${year}`;
+}
+
+// Get slot for time windowing
+function getTradeSlot(timestamp: number, period: PeriodDuration): TimeSlot {
+  const d = new Date(timestamp * 1000);
+  const hour = d.getHours();
+  const min = d.getMinutes();
+
+  let bracketSize = 60;
+  if (period === "5m") bracketSize = 5;
+  if (period === "15m") bracketSize = 15;
+  if (period === "1hr") bracketSize = 60;
+
+  const slotIndex = Math.floor(min / bracketSize);
+  const startMin = slotIndex * bracketSize;
+  const startHour = hour;
+
+  const endMin = startMin + bracketSize;
+  let endHour = hour;
+  let displayEndMin = endMin;
+
+  if (endMin >= 60) {
+    displayEndMin = 0;
+    endHour = (hour + 1) % 24;
   }
 
-  return Array.from(groups.entries())
-    .map(([label, groupTrades]) => {
-      const totalVolume = groupTrades.reduce(
-        (sum, t) =>
-          sum +
-          (t.size ?? 0) * (t.price ?? 0),
-        0
-      );
-      const netPnl = 0;
-      return {
-        label,
-        timestamp: groupTrades[0]?.timestamp ?? 0,
-        tradeCount: groupTrades.length,
-        totalVolume,
-        netPnl,
-        trades: groupTrades.sort(
-          (a, b) => (b.timestamp ?? 0) - (a.timestamp ?? 0)
-        ),
-      };
-    })
-    .sort((a, b) => b.timestamp - a.timestamp);
+  const formatTime = (h: number, m: number) => {
+    const ampm = h >= 12 ? "PM" : "AM";
+    const displayHour = h % 12 === 0 ? 12 : h % 12;
+    return `${displayHour}:${String(m).padStart(2, "0")} ${ampm}`;
+  };
+
+  const label = `${formatTime(startHour, startMin)} - ${formatTime(endHour, displayEndMin)}`;
+  const key = `${String(startHour).padStart(2, "0")}:${String(startMin).padStart(2, "0")}`;
+
+  return { key, label, startHour, startMin };
 }
 
 export default function TradesExplorer({
@@ -90,25 +116,74 @@ export default function TradesExplorer({
   const [currentPage, setCurrentPage] = useState(1);
   const [loading, setLoading] = useState(false);
   const [hasMore, setHasMore] = useState(true);
+
+  // Progressive State Navigation
+  const [viewLevel, setViewLevel] = useState<ViewLevel>("assets");
+  const [selectedAsset, setSelectedAsset] = useState<AssetCategory>("ALL");
+  const [selectedPeriod, setSelectedPeriod] = useState<PeriodDuration>("ALL");
+  const [selectedMonth, setSelectedMonth] = useState<string | null>(null); // "yyyy-MM"
+  const [selectedDay, setSelectedDay] = useState<string | null>(null); // "yyyy-MM-dd"
+  const [selectedSlot, setSelectedSlot] = useState<TimeSlot | null>(null);
+
+  // General Filter options (persist through levels)
   const [marketFilter, setMarketFilter] = useState("");
   const [sideFilter, setSideFilter] = useState<Side>("ALL");
   const [dateStart, setDateStart] = useState("");
   const [dateEnd, setDateEnd] = useState("");
-  const [groupBy, setGroupBy] = useState<GroupBy>("day");
-  const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
+
   const nextOffsetRef = useRef(initialTrades.length);
 
+  // Classified initial trades
+  const classifiedTrades = useMemo(() => {
+    return allTrades.map((t) => ({
+      ...t,
+      classifiedAsset: extractCryptocurrency(t.title, t.slug),
+      classifiedPeriod: extractPeriodDuration(t.slug),
+    }));
+  }, [allTrades]);
+
+  // Aggregate loaded stats by category
+  const categoryStats = useMemo(() => {
+    const stats: Record<AssetCategory, { count: number; volume: number }> = {
+      ALL: { count: 0, volume: 0 },
+      BTC: { count: 0, volume: 0 },
+      ETH: { count: 0, volume: 0 },
+      SOL: { count: 0, volume: 0 },
+      XRP: { count: 0, volume: 0 },
+      GENERAL: { count: 0, volume: 0 },
+    };
+
+    classifiedTrades.forEach((t) => {
+      const vol = (t.size ?? 0) * (t.price ?? 0);
+      stats.ALL.count++;
+      stats.ALL.volume += vol;
+
+      const cat = t.classifiedAsset;
+      stats[cat].count++;
+      stats[cat].volume += vol;
+    });
+
+    return stats;
+  }, [classifiedTrades]);
+
+  // Filter based on standard input filters + level selections
   const filteredTrades = useMemo(() => {
-    return allTrades.filter((trade) => {
+    return classifiedTrades.filter((trade) => {
+      // General side filters
+      if (sideFilter !== "ALL" && trade.side !== sideFilter) return false;
+
+      // General query filters
       if (marketFilter) {
         const q = marketFilter.toLowerCase();
         if (
           !trade.title?.toLowerCase().includes(q) &&
           !trade.slug?.toLowerCase().includes(q)
-        )
+        ) {
           return false;
+        }
       }
-      if (sideFilter !== "ALL" && trade.side !== sideFilter) return false;
+
+      // Date constraints
       if (dateStart && trade.timestamp) {
         const start = new Date(dateStart).getTime() / 1000;
         if (trade.timestamp < start) return false;
@@ -117,23 +192,163 @@ export default function TradesExplorer({
         const end = new Date(dateEnd).getTime() / 1000;
         if (trade.timestamp > end) return false;
       }
+
       return true;
     });
-  }, [allTrades, marketFilter, sideFilter, dateStart, dateEnd]);
+  }, [classifiedTrades, sideFilter, marketFilter, dateStart, dateEnd]);
 
-  const groups = useMemo(
-    () => groupTrades(filteredTrades, groupBy),
-    [filteredTrades, groupBy]
-  );
+  // Filter specifically for Category Selection
+  const categoryFilteredTrades = useMemo(() => {
+    return filteredTrades.filter((t) => {
+      if (selectedAsset !== "ALL" && t.classifiedAsset !== selectedAsset) return false;
+      return true;
+    });
+  }, [filteredTrades, selectedAsset]);
 
-  const totalPages = Math.max(
-    1,
-    Math.ceil(filteredTrades.length / PAGE_SIZE)
-  );
-  const paginatedGroups = groups.slice(
-    (currentPage - 1) * PAGE_SIZE,
-    currentPage * PAGE_SIZE
-  );
+  // Filter specifically for Period Selection
+  const periodFilteredTrades = useMemo(() => {
+    return categoryFilteredTrades.filter((t) => {
+      if (selectedPeriod !== "ALL" && t.classifiedPeriod !== selectedPeriod) return false;
+      return true;
+    });
+  }, [categoryFilteredTrades, selectedPeriod]);
+
+  // Filter specifically for Month Selection
+  const monthFilteredTrades = useMemo(() => {
+    return periodFilteredTrades.filter((t) => {
+      if (!selectedMonth || !t.timestamp) return true;
+      const d = new Date(t.timestamp * 1000);
+      const mKey = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+      return mKey === selectedMonth;
+    });
+  }, [periodFilteredTrades, selectedMonth]);
+
+  // Filter specifically for Day Selection
+  const dayFilteredTrades = useMemo(() => {
+    return monthFilteredTrades.filter((t) => {
+      if (!selectedDay || !t.timestamp) return true;
+      const d = new Date(t.timestamp * 1000);
+      const dKey = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+      return dKey === selectedDay;
+    });
+  }, [monthFilteredTrades, selectedDay]);
+
+  // Final filtered list of trades matching ALL current drill-downs
+  const activeDetailTrades = useMemo(() => {
+    return dayFilteredTrades.filter((t) => {
+      if (!selectedSlot || !t.timestamp) return true;
+      const slot = getTradeSlot(t.timestamp, selectedPeriod);
+      return slot.key === selectedSlot.key;
+    });
+  }, [dayFilteredTrades, selectedSlot, selectedPeriod]);
+
+  // Active selection summary stats banner
+  const activeBannerStats = useMemo(() => {
+    let totalVolume = 0;
+    let buys = 0;
+    let sells = 0;
+
+    // Use current level's filtered list
+    const list =
+      viewLevel === "trades"
+        ? activeDetailTrades
+        : viewLevel === "slots"
+          ? dayFilteredTrades
+          : viewLevel === "days"
+            ? monthFilteredTrades
+            : viewLevel === "months"
+              ? periodFilteredTrades
+              : viewLevel === "periods"
+                ? categoryFilteredTrades
+                : filteredTrades;
+
+    list.forEach((t) => {
+      totalVolume += (t.size ?? 0) * (t.price ?? 0);
+      if (t.side === "BUY") buys++;
+      if (t.side === "SELL") sells++;
+    });
+
+    const totalTrades = list.length;
+    const avgTradeSize = totalTrades > 0 ? totalVolume / totalTrades : 0;
+    const buyRatio = totalTrades > 0 ? (buys / totalTrades) * 100 : 0;
+
+    return {
+      totalVolume,
+      totalTrades,
+      avgTradeSize,
+      buyRatio,
+    };
+  }, [
+    viewLevel,
+    filteredTrades,
+    categoryFilteredTrades,
+    periodFilteredTrades,
+    monthFilteredTrades,
+    dayFilteredTrades,
+    activeDetailTrades,
+  ]);
+
+  // Groupings by Month for Level 3
+  const monthsData = useMemo(() => {
+    const map = new Map<string, { count: number; volume: number }>();
+    periodFilteredTrades.forEach((t) => {
+      if (!t.timestamp) return;
+      const d = new Date(t.timestamp * 1000);
+      const mKey = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+      const vol = (t.size ?? 0) * (t.price ?? 0);
+      const current = map.get(mKey) ?? { count: 0, volume: 0 };
+      map.set(mKey, {
+        count: current.count + 1,
+        volume: current.volume + vol,
+      });
+    });
+    return Array.from(map.entries())
+      .map(([key, data]) => ({ key, ...data }))
+      .sort((a, b) => b.key.localeCompare(a.key));
+  }, [periodFilteredTrades]);
+
+  // Groupings by Day for Level 4
+  const daysData = useMemo(() => {
+    const map = new Map<string, { count: number; volume: number }>();
+    monthFilteredTrades.forEach((t) => {
+      if (!t.timestamp) return;
+      const d = new Date(t.timestamp * 1000);
+      const dKey = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+      const vol = (t.size ?? 0) * (t.price ?? 0);
+      const current = map.get(dKey) ?? { count: 0, volume: 0 };
+      map.set(dKey, {
+        count: current.count + 1,
+        volume: current.volume + vol,
+      });
+    });
+    return Array.from(map.entries())
+      .map(([key, data]) => ({ key, ...data }))
+      .sort((a, b) => b.key.localeCompare(a.key));
+  }, [monthFilteredTrades]);
+
+  // Groupings by Time Slots for Level 5
+  const slotsData = useMemo(() => {
+    const map = new Map<string, { label: string; count: number; volume: number; slot: TimeSlot }>();
+    dayFilteredTrades.forEach((t) => {
+      if (!t.timestamp) return;
+      const slot = getTradeSlot(t.timestamp, selectedPeriod);
+      const vol = (t.size ?? 0) * (t.price ?? 0);
+      const current = map.get(slot.key) ?? { label: slot.label, count: 0, volume: 0, slot };
+      map.set(slot.key, {
+        label: slot.label,
+        count: current.count + 1,
+        volume: current.volume + vol,
+        slot,
+      });
+    });
+    return Array.from(map.values()).sort((a, b) => a.slot.key.localeCompare(b.slot.key));
+  }, [dayFilteredTrades, selectedPeriod]);
+
+  // Paginated detail trades for Level 6
+  const totalPages = Math.max(1, Math.ceil(activeDetailTrades.length / PAGE_SIZE));
+  const paginatedTrades = useMemo(() => {
+    return activeDetailTrades.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
+  }, [activeDetailTrades, currentPage]);
 
   const handleLoadMore = useCallback(async () => {
     setLoading(true);
@@ -163,21 +378,17 @@ export default function TradesExplorer({
     const exportData = {
       user: userAddress,
       filters: {
+        asset: selectedAsset,
+        period: selectedPeriod,
+        month: selectedMonth,
+        day: selectedDay,
+        slot: selectedSlot?.label,
         market: marketFilter || "ALL",
         side: sideFilter,
         dateRange:
-          dateStart || dateEnd
-            ? `${dateStart || "..."} – ${dateEnd || "..."}`
-            : "ALL",
+          dateStart || dateEnd ? `${dateStart || "..."} – ${dateEnd || "..."}` : "ALL",
       },
-      groupBy,
-      groups: groups.map((g) => ({
-        label: g.label,
-        tradeCount: g.tradeCount,
-        totalVolume: g.totalVolume,
-        netPnl: g.netPnl,
-        trades: g.trades,
-      })),
+      trades: activeDetailTrades,
       exportedAt: new Date().toISOString(),
     };
 
@@ -187,246 +398,532 @@ export default function TradesExplorer({
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `trades-${userAddress.slice(0, 8)}-${new Date().toISOString().split("T")[0]}.json`;
+    a.download = `trades-${selectedAsset.toLowerCase()}-${selectedPeriod.toLowerCase()}-${selectedDay || "export"}.json`;
     a.click();
     URL.revokeObjectURL(url);
-  }, [userAddress, marketFilter, sideFilter, dateStart, dateEnd, groupBy, groups]);
+  }, [
+    userAddress,
+    selectedAsset,
+    selectedPeriod,
+    selectedMonth,
+    selectedDay,
+    selectedSlot,
+    marketFilter,
+    sideFilter,
+    dateStart,
+    dateEnd,
+    activeDetailTrades,
+  ]);
 
-  const toggleGroup = (label: string) => {
-    setExpandedGroups((prev) => {
-      const next = new Set(prev);
-      if (next.has(label)) {
-        next.delete(label);
-      } else {
-        next.add(label);
-      }
-      return next;
-    });
+  // Navigate directly using breadcrumbs
+  const navigateToLevel = (level: ViewLevel) => {
+    setCurrentPage(1);
+    setViewLevel(level);
+    if (level === "assets") {
+      setSelectedAsset("ALL");
+      setSelectedPeriod("ALL");
+      setSelectedMonth(null);
+      setSelectedDay(null);
+      setSelectedSlot(null);
+    } else if (level === "periods") {
+      setSelectedPeriod("ALL");
+      setSelectedMonth(null);
+      setSelectedDay(null);
+      setSelectedSlot(null);
+    } else if (level === "months") {
+      setSelectedMonth(null);
+      setSelectedDay(null);
+      setSelectedSlot(null);
+    } else if (level === "days") {
+      setSelectedDay(null);
+      setSelectedSlot(null);
+    } else if (level === "slots") {
+      setSelectedSlot(null);
+    }
+  };
+
+  const handleAssetClick = (asset: AssetCategory) => {
+    setSelectedAsset(asset);
+    if (asset === "ALL" || asset === "GENERAL") {
+      setSelectedPeriod("GENERAL");
+      setViewLevel("months");
+    } else {
+      setViewLevel("periods");
+    }
+  };
+
+  const handlePeriodClick = (pd: PeriodDuration) => {
+    setSelectedPeriod(pd);
+    setViewLevel("months");
+  };
+
+  const handleMonthClick = (mKey: string) => {
+    setSelectedMonth(mKey);
+    setViewLevel("days");
+  };
+
+  const handleDayClick = (dKey: string) => {
+    setSelectedDay(dKey);
+    setViewLevel("slots");
+  };
+
+  const handleSlotClick = (slot: TimeSlot) => {
+    setSelectedSlot(slot);
+    setViewLevel("trades");
   };
 
   return (
-    <div>
-      <div className="mb-4 flex flex-wrap items-center gap-3">
-        <span className="text-xs text-muted">
-          {allTrades.length.toLocaleString()} trades loaded
-        </span>
-        {hasMore && (
-          <button
-            onClick={handleLoadMore}
-            disabled={loading}
-            className="rounded bg-accent px-3 py-1 text-xs font-medium text-white hover:opacity-90 disabled:opacity-50 transition-opacity"
-          >
-            {loading ? "Loading..." : "Load More"}
-          </button>
-        )}
+    <div className="space-y-6">
+      {/* Breadcrumb path navigation */}
+      <div className="flex flex-wrap items-center gap-1.5 text-xs text-muted select-none border-b border-border/40 pb-2">
         <button
-          onClick={handleExport}
-          className="rounded bg-card border border-border px-3 py-1 text-xs font-medium text-foreground hover:bg-card-hover transition-colors"
+          onClick={() => navigateToLevel("assets")}
+          className="hover:text-foreground transition-colors font-medium"
         >
-          Download JSON
+          All Categories
         </button>
-      </div>
-
-      <div className="mb-4 flex flex-wrap items-center gap-2 sm:gap-3">
-        <input
-          type="text"
-          placeholder="Filter market…"
-          value={marketFilter}
-          onChange={(e) => {
-            setMarketFilter(e.target.value);
-            setCurrentPage(1);
-          }}
-          className="rounded border border-border bg-card px-2 py-1 text-xs text-foreground placeholder:text-muted outline-none focus:border-accent w-full sm:w-40"
-        />
-
-        <div className="flex w-full sm:w-auto gap-2 sm:gap-3">
-          <select
-            value={sideFilter}
-            onChange={(e) => {
-              setSideFilter(e.target.value as Side);
-              setCurrentPage(1);
-            }}
-            className="flex-1 sm:flex-none rounded border border-border bg-card px-2 py-1 text-xs text-foreground outline-none focus:border-accent"
-          >
-            <option value="ALL">All Sides</option>
-            <option value="BUY">Buy</option>
-            <option value="SELL">Sell</option>
-          </select>
-
-          <select
-            value={groupBy}
-            onChange={(e) => {
-              setGroupBy(e.target.value as GroupBy);
-              setCurrentPage(1);
-            }}
-            className="flex-1 sm:flex-none rounded border border-border bg-card px-2 py-1 text-xs text-foreground outline-none focus:border-accent"
-          >
-            <option value="minute">Minute</option>
-            <option value="hour">Hour</option>
-            <option value="day">Day</option>
-            <option value="week">Week</option>
-            <option value="month">Month</option>
-            <option value="year">Year</option>
-          </select>
-        </div>
-
-        <div className="flex w-full sm:w-auto items-center gap-2">
-          <input
-            type="date"
-            value={dateStart}
-            onChange={(e) => {
-              setDateStart(e.target.value);
-              setCurrentPage(1);
-            }}
-            className="flex-1 sm:flex-none rounded border border-border bg-card px-2 py-1 text-xs text-foreground outline-none focus:border-accent min-w-0"
-          />
-          <span className="text-[10px] text-muted shrink-0">to</span>
-          <input
-            type="date"
-            value={dateEnd}
-            onChange={(e) => {
-              setDateEnd(e.target.value);
-              setCurrentPage(1);
-            }}
-            className="flex-1 sm:flex-none rounded border border-border bg-card px-2 py-1 text-xs text-foreground outline-none focus:border-accent min-w-0"
-          />
-        </div>
-      </div>
-
-      <div className="mb-4 flex items-center gap-4 text-xs text-muted">
-        <span>
-          Page {currentPage} of {totalPages}
-        </span>
-        <div className="flex gap-1">
-          <button
-            onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
-            disabled={currentPage <= 1}
-            className="rounded bg-card border border-border px-2 py-0.5 text-xs disabled:opacity-30 hover:bg-card-hover transition-colors"
-          >
-            Prev
-          </button>
-          <button
-            onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
-            disabled={currentPage >= totalPages}
-            className="rounded bg-card border border-border px-2 py-0.5 text-xs disabled:opacity-30 hover:bg-card-hover transition-colors"
-          >
-            Next
-          </button>
-        </div>
-      </div>
-
-      <div className="space-y-1">
-        {paginatedGroups.map((group) => (
-          <div key={group.label}>
+        {selectedAsset !== "ALL" && (
+          <>
+            <span className="text-zinc-600">/</span>
             <button
-              onClick={() => toggleGroup(group.label)}
-              className="flex w-full items-center justify-between rounded border border-border bg-card px-2 sm:px-3 py-2 text-left hover:bg-card-hover transition-colors gap-2"
+              onClick={() =>
+                navigateToLevel(selectedAsset === "GENERAL" ? "months" : "periods")
+              }
+              className="hover:text-foreground transition-colors font-medium text-accent"
             >
-              <div className="flex items-center gap-1.5 sm:gap-3 min-w-0">
-                <span
-                  className={`shrink-0 transition-transform ${
-                    expandedGroups.has(group.label) ? "rotate-90" : ""
-                  }`}
-                >
-                  <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M6 4l4 4-4 4" />
-                  </svg>
-                </span>
-                <span className="text-xs font-medium text-foreground truncate">
-                  {group.label}
-                </span>
-                <span className="text-[10px] text-muted shrink-0">
-                  {group.tradeCount}
-                </span>
-              </div>
-              <div className="flex items-center gap-2 sm:gap-4 text-xs font-mono tabular-nums shrink-0">
-                <span className="text-muted">
-                  {formatUsd(group.totalVolume)}
-                </span>
-                {group.netPnl !== 0 && (
-                  <span
-                    className={
-                      group.netPnl > 0 ? "text-profit" : "text-loss"
-                    }
-                  >
-                    {formatPnl(group.netPnl)}
-                  </span>
-                )}
-              </div>
+              {selectedAsset}
             </button>
+          </>
+        )}
+        {selectedPeriod !== "ALL" && selectedAsset !== "GENERAL" && (
+          <>
+            <span className="text-zinc-600">/</span>
+            <button
+              onClick={() => navigateToLevel("months")}
+              className="hover:text-foreground transition-colors font-medium text-purple-400"
+            >
+              {selectedPeriod} Markets
+            </button>
+          </>
+        )}
+        {selectedMonth && (
+          <>
+            <span className="text-zinc-600">/</span>
+            <button
+              onClick={() => navigateToLevel("days")}
+              className="hover:text-foreground transition-colors font-medium"
+            >
+              {formatHumanMonth(selectedMonth)}
+            </button>
+          </>
+        )}
+        {selectedDay && (
+          <>
+            <span className="text-zinc-600">/</span>
+            <button
+              onClick={() => navigateToLevel("slots")}
+              className="hover:text-foreground transition-colors font-medium"
+            >
+              {formatHumanDate(selectedDay)}
+            </button>
+          </>
+        )}
+        {selectedSlot && (
+          <>
+            <span className="text-zinc-600">/</span>
+            <span className="text-foreground font-semibold">{selectedSlot.label}</span>
+          </>
+        )}
+      </div>
 
-            {expandedGroups.has(group.label) && (
-              <div className="overflow-x-auto">
-                  <table className="w-full text-xs">
-                  <thead>
-                    <tr className="text-left text-[10px] uppercase tracking-wider text-muted">
-                      <th className="px-2 sm:px-3 py-1.5 font-medium">Time</th>
-                      <th className="hidden sm:table-cell px-2 sm:px-3 py-1.5 font-medium">Market</th>
-                      <th className="px-2 sm:px-3 py-1.5 font-medium">Side</th>
-                      <th className="px-2 sm:px-3 py-1.5 font-medium text-right">
-                        Size
-                      </th>
-                      <th className="hidden sm:table-cell px-2 sm:px-3 py-1.5 font-medium text-right">
-                        Price
-                      </th>
-                      <th className="px-2 sm:px-3 py-1.5 font-medium text-right">
-                        Total
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {group.trades.map((trade, i) => (
+      {/* Stats Summary Banner for current filter state */}
+      <div className="grid grid-cols-2 gap-4 rounded-xl border border-border bg-card/45 p-4.5 sm:grid-cols-4 shadow-sm">
+        <div>
+          <span className="text-[10px] uppercase font-bold tracking-wider text-muted">
+            Filtered Volume
+          </span>
+          <p className="text-lg font-mono font-bold tabular-nums text-foreground mt-0.5">
+            {formatUsd(activeBannerStats.totalVolume)}
+          </p>
+        </div>
+        <div>
+          <span className="text-[10px] uppercase font-bold tracking-wider text-muted">
+            Filtered Trades
+          </span>
+          <p className="text-lg font-mono font-bold tabular-nums text-foreground mt-0.5">
+            {activeBannerStats.totalTrades.toLocaleString()}
+          </p>
+        </div>
+        <div>
+          <span className="text-[10px] uppercase font-bold tracking-wider text-muted">
+            Avg. Size
+          </span>
+          <p className="text-lg font-mono font-bold tabular-nums text-foreground mt-0.5">
+            {formatUsd(activeBannerStats.avgTradeSize)}
+          </p>
+        </div>
+        <div>
+          <span className="text-[10px] uppercase font-bold tracking-wider text-muted">
+            Buy Ratio
+          </span>
+          <p className="text-lg font-mono font-bold tabular-nums text-foreground mt-0.5">
+            {activeBannerStats.buyRatio.toFixed(1)}% Buy
+          </p>
+        </div>
+      </div>
+
+      {/* Global input controls and pagination hooks */}
+      <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border bg-card/25 p-3">
+        <div className="flex flex-wrap items-center gap-3 flex-1">
+          <input
+            type="text"
+            placeholder="Search active selection…"
+            value={marketFilter}
+            onChange={(e) => {
+              setMarketFilter(e.target.value);
+              setCurrentPage(1);
+            }}
+            className="rounded border border-border bg-card px-3 py-1.5 text-xs text-foreground placeholder:text-muted outline-none focus:border-accent w-full sm:w-56"
+          />
+
+          <div className="flex w-full sm:w-auto gap-2">
+            <select
+              value={sideFilter}
+              onChange={(e) => {
+                setSideFilter(e.target.value as Side);
+                setCurrentPage(1);
+              }}
+              className="rounded border border-border bg-card px-3 py-1.5 text-xs text-foreground outline-none focus:border-accent"
+            >
+              <option value="ALL">All Sides</option>
+              <option value="BUY">Buy Only</option>
+              <option value="SELL">Sell Only</option>
+            </select>
+          </div>
+
+          <div className="flex w-full sm:w-auto items-center gap-2">
+            <input
+              type="date"
+              value={dateStart}
+              onChange={(e) => {
+                setDateStart(e.target.value);
+                setCurrentPage(1);
+              }}
+              className="rounded border border-border bg-card px-3 py-1.5 text-xs text-foreground outline-none focus:border-accent"
+            />
+            <span className="text-[10px] text-muted font-mono shrink-0">to</span>
+            <input
+              type="date"
+              value={dateEnd}
+              onChange={(e) => {
+                setDateEnd(e.target.value);
+                setCurrentPage(1);
+              }}
+              className="rounded border border-border bg-card px-3 py-1.5 text-xs text-foreground outline-none focus:border-accent"
+            />
+          </div>
+        </div>
+
+        <div className="flex items-center gap-2 w-full sm:w-auto sm:ml-auto">
+          {hasMore && (
+            <button
+              onClick={handleLoadMore}
+              disabled={loading}
+              className="flex-1 sm:flex-none rounded bg-accent px-4 py-1.5 text-xs font-semibold text-white hover:opacity-90 disabled:opacity-50 transition-opacity"
+            >
+              {loading ? "Loading..." : "Load 5k More"}
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* PROGRESSIVE VIEWS */}
+
+      {/* LEVEL 1: ASSETS VIEW */}
+      {viewLevel === "assets" && (
+        <div className="space-y-4">
+          <h3 className="text-xs font-bold uppercase tracking-wider text-muted">
+            Select Asset Market
+          </h3>
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
+            {(["ALL", "BTC", "ETH", "SOL", "XRP", "GENERAL"] as AssetCategory[]).map((cat) => {
+              const stats = categoryStats[cat];
+              return (
+                <button
+                  key={cat}
+                  onClick={() => handleAssetClick(cat)}
+                  className="flex flex-col rounded-xl border border-border bg-card/60 p-4 text-left hover:bg-card-hover hover:border-muted transition-all duration-200 group"
+                >
+                  <span className="text-xs font-bold tracking-wider text-muted group-hover:text-accent transition-colors">
+                    {cat}
+                  </span>
+                  <span className="mt-3 text-2xl font-mono font-bold tabular-nums text-foreground">
+                    {stats.count.toLocaleString()}
+                  </span>
+                  <span className="text-[10px] font-mono text-muted tabular-nums mt-0.5">
+                    {formatUsdCompact(stats.volume)} Vol
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* LEVEL 2: PERIODS VIEW */}
+      {viewLevel === "periods" && (
+        <div className="space-y-4">
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => navigateToLevel("assets")}
+              className="text-xs text-accent hover:underline"
+            >
+              ← Back
+            </button>
+            <h3 className="text-xs font-bold uppercase tracking-wider text-muted">
+              Select Period Duration for {selectedAsset}
+            </h3>
+          </div>
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
+            {([
+              { id: "ALL", label: "All Durations" },
+              { id: "5m", label: "5m Markets" },
+              { id: "15m", label: "15m Markets" },
+              { id: "1hr", label: "1hr Markets" },
+              { id: "GENERAL", label: "Other prediction" },
+            ] as { id: PeriodDuration; label: string }[]).map((pd) => {
+              return (
+                <button
+                  key={pd.id}
+                  onClick={() => handlePeriodClick(pd.id)}
+                  className="flex flex-col rounded-xl border border-border bg-card/60 p-4 text-left hover:bg-card-hover hover:border-muted transition-all duration-200"
+                >
+                  <span className="text-xs font-bold text-foreground">{pd.label}</span>
+                  <span className="text-[10px] text-muted mt-2">
+                    Click to drill down into months
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* LEVEL 3: MONTHS GRID */}
+      {viewLevel === "months" && (
+        <div className="space-y-4">
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() =>
+                navigateToLevel(selectedAsset === "GENERAL" ? "assets" : "periods")
+              }
+              className="text-xs text-accent hover:underline"
+            >
+              ← Back
+            </button>
+            <h3 className="text-xs font-bold uppercase tracking-wider text-muted">Select Month</h3>
+          </div>
+          {monthsData.length === 0 ? (
+            <p className="text-xs text-muted py-4">No active months found for this category.</p>
+          ) : (
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-6">
+              {monthsData.map((m) => (
+                <button
+                  key={m.key}
+                  onClick={() => handleMonthClick(m.key)}
+                  className="flex flex-col rounded-xl border border-border bg-card/60 p-4 text-left hover:bg-card-hover hover:border-muted transition-all duration-200 font-mono"
+                >
+                  <span className="text-xs font-bold text-foreground">
+                    {formatHumanMonth(m.key)}
+                  </span>
+                  <span className="text-lg font-bold text-accent mt-2">
+                    {m.count.toLocaleString()}
+                  </span>
+                  <span className="text-[10px] text-muted">{formatUsdCompact(m.volume)} Vol</span>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* LEVEL 4: DAYS GRID */}
+      {viewLevel === "days" && (
+        <div className="space-y-4">
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => navigateToLevel("months")}
+              className="text-xs text-accent hover:underline"
+            >
+              ← Back
+            </button>
+            <h3 className="text-xs font-bold uppercase tracking-wider text-muted">Select Day</h3>
+          </div>
+          {daysData.length === 0 ? (
+            <p className="text-xs text-muted py-4">No active days found for this month.</p>
+          ) : (
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-6">
+              {daysData.map((d) => (
+                <button
+                  key={d.key}
+                  onClick={() => handleDayClick(d.key)}
+                  className="flex flex-col rounded-xl border border-border bg-card/60 p-4 text-left hover:bg-card-hover hover:border-muted transition-all duration-200 font-mono"
+                >
+                  <span className="text-xs font-bold text-foreground">
+                    {formatHumanDate(d.key)}
+                  </span>
+                  <span className="text-lg font-bold text-accent mt-2">
+                    {d.count.toLocaleString()}
+                  </span>
+                  <span className="text-[10px] text-muted">{formatUsdCompact(d.volume)} Vol</span>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* LEVEL 5: TIME SLOTS */}
+      {viewLevel === "slots" && (
+        <div className="space-y-4">
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => navigateToLevel("days")}
+              className="text-xs text-accent hover:underline"
+            >
+              ← Back
+            </button>
+            <h3 className="text-xs font-bold uppercase tracking-wider text-muted">
+              Select Time Bracket
+            </h3>
+          </div>
+          {slotsData.length === 0 ? (
+            <p className="text-xs text-muted py-4">No slots active on this day.</p>
+          ) : (
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
+              {slotsData.map((s) => (
+                <button
+                  key={s.slot.key}
+                  onClick={() => handleSlotClick(s.slot)}
+                  className="flex items-center justify-between rounded-xl border border-border bg-card/60 p-4 hover:bg-card-hover hover:border-muted transition-all duration-200"
+                >
+                  <span className="text-xs font-bold text-foreground font-mono">{s.label}</span>
+                  <div className="text-right font-mono">
+                    <span className="rounded bg-accent/15 px-2 py-0.5 text-[10px] font-bold text-accent">
+                      {s.count} trades
+                    </span>
+                    <p className="text-[10px] text-muted mt-1">{formatUsdCompact(s.volume)}</p>
+                  </div>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* LEVEL 6: TRADES TABLE LOG */}
+      {viewLevel === "trades" && (
+        <div className="space-y-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => navigateToLevel("slots")}
+                className="text-xs text-accent hover:underline font-semibold"
+              >
+                ← Back to slots
+              </button>
+            </div>
+            <button
+              onClick={handleExport}
+              className="rounded bg-card border border-border px-4 py-1.5 text-xs font-semibold text-foreground hover:bg-card-hover transition-colors"
+            >
+              Download JSON
+            </button>
+          </div>
+
+          <div className="flex items-center justify-between text-xs text-muted border-t border-border pt-4">
+            <span>
+              Page {currentPage} of {totalPages} (showing {activeDetailTrades.length} trades in slot)
+            </span>
+            <div className="flex gap-1.5">
+              <button
+                onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+                disabled={currentPage <= 1}
+                className="rounded bg-card border border-border px-3 py-1 text-xs disabled:opacity-30 hover:bg-card-hover transition-colors"
+              >
+                Prev
+              </button>
+              <button
+                onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+                disabled={currentPage >= totalPages}
+                className="rounded bg-card border border-border px-3 py-1 text-xs disabled:opacity-30 hover:bg-card-hover transition-colors"
+              >
+                Next
+              </button>
+            </div>
+          </div>
+
+          <div className="overflow-hidden rounded-xl border border-border bg-card">
+            <div className="overflow-x-auto custom-scrollbar">
+              <table className="w-full text-xs">
+                <thead>
+                  <tr className="text-left text-[9px] uppercase tracking-wider text-muted border-b border-border/40 bg-card/40">
+                    <th className="pl-4 pr-3 py-2.5 font-medium">Time (Local)</th>
+                    <th className="hidden sm:table-cell px-3 py-2.5 font-medium">Market</th>
+                    <th className="px-3 py-2.5 font-medium">Side</th>
+                    <th className="px-3 py-2.5 font-medium text-right">Shares</th>
+                    <th className="hidden sm:table-cell px-3 py-2.5 font-medium text-right">Price</th>
+                    <th className="pr-4 pl-3 py-2.5 font-medium text-right">Total</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {paginatedTrades.map((trade, i) => {
+                    const isBuy = trade.side === "BUY";
+                    return (
                       <tr
                         key={trade.transactionHash ?? i}
-                        className="border-b border-border/30"
+                        className="border-b border-border/25 hover:bg-card-hover/20 transition-colors"
                       >
-                        <td className="px-2 sm:px-3 py-1.5 text-muted font-mono tabular-nums whitespace-nowrap text-[11px] sm:text-xs">
-                          {trade.timestamp
-                            ? formatDateTime(trade.timestamp)
-                            : "-"}
+                        <td className="pl-4 pr-3 py-2.5 text-muted font-mono tabular-nums whitespace-nowrap text-[11px] sm:text-xs">
+                          {trade.timestamp ? formatDateTime(trade.timestamp) : "-"}
                         </td>
-                        <td className="hidden sm:table-cell px-2 sm:px-3 py-1.5 max-w-[200px] truncate">
-                          {trade.title ?? "Unknown"}
+                        <td className="hidden sm:table-cell px-3 py-2.5 max-w-[280px] truncate text-foreground font-medium">
+                          {trade.title ?? "Unknown Market"}
                         </td>
-                        <td
-                          className={`px-2 sm:px-3 py-1.5 font-medium text-[11px] sm:text-xs ${
-                            trade.side === "BUY"
-                              ? "text-profit"
-                              : trade.side === "SELL"
-                                ? "text-loss"
-                                : ""
-                          }`}
-                        >
-                          {trade.side ?? "-"}
+                        <td className="px-3 py-2.5">
+                          <span
+                            className={`rounded px-1.5 py-0.5 text-[10px] font-bold ${
+                              isBuy ? "bg-profit/10 text-profit" : "bg-loss/10 text-loss"
+                            }`}
+                          >
+                            {trade.side ?? "-"}
+                          </span>
                         </td>
-                        <td className="px-2 sm:px-3 py-1.5 text-right font-mono tabular-nums text-[11px] sm:text-xs">
-                          {trade.size?.toFixed(2) ?? "-"}
+                        <td className="px-3 py-2.5 text-right font-mono tabular-nums text-[11px] sm:text-xs">
+                          {trade.size?.toLocaleString(undefined, {
+                            minimumFractionDigits: 2,
+                            maximumFractionDigits: 2,
+                          }) ?? "-"}
                         </td>
-                        <td className="hidden sm:table-cell px-2 sm:px-3 py-1.5 text-right font-mono tabular-nums">
-                          {trade.price != null
-                            ? `${(trade.price * 100).toFixed(1)}¢`
-                            : "-"}
+                        <td className="hidden sm:table-cell px-3 py-2.5 text-right font-mono tabular-nums">
+                          {trade.price != null ? `${(trade.price * 100).toFixed(1)}¢` : "-"}
                         </td>
-                        <td className="px-2 sm:px-3 py-1.5 text-right font-mono tabular-nums text-[11px] sm:text-xs">
+                        <td className="pr-4 pl-3 py-2.5 text-right font-mono font-bold tabular-nums text-foreground text-[11px] sm:text-xs">
                           {trade.size != null && trade.price != null
                             ? formatUsd(trade.size * trade.price)
                             : "-"}
                         </td>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
           </div>
-        ))}
-      </div>
-
-      {paginatedGroups.length === 0 && (
-        <p className="py-8 text-center text-xs text-muted">
-          No trades match the current filters.
-        </p>
+        </div>
       )}
     </div>
   );
 }
+
+
