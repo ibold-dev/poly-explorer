@@ -115,7 +115,7 @@ export default function TradesExplorer({
   const [allTrades, setAllTrades] = useState<Trade[]>(initialTrades);
   const [currentPage, setCurrentPage] = useState(1);
   const [loading, setLoading] = useState(false);
-  const [hasMore, setHasMore] = useState(true);
+  const [hasMore, setHasMore] = useState(initialTrades.length === BATCH_SIZE);
 
   // Progressive State Navigation
   const [viewLevel, setViewLevel] = useState<ViewLevel>("assets");
@@ -356,6 +356,10 @@ export default function TradesExplorer({
   }, [activeDetailTrades, currentPage]);
 
   const handleLoadMore = useCallback(async () => {
+    if (nextOffsetRef.current >= 10000) {
+      setHasMore(false);
+      return;
+    }
     setLoading(true);
     try {
       const res = await fetch(
@@ -368,7 +372,7 @@ export default function TradesExplorer({
       } else {
         setAllTrades((prev) => [...prev, ...newTrades]);
         nextOffsetRef.current += newTrades.length;
-        if (newTrades.length < BATCH_SIZE) {
+        if (newTrades.length < BATCH_SIZE || nextOffsetRef.current >= 10000) {
           setHasMore(false);
         }
       }
@@ -773,16 +777,17 @@ export default function TradesExplorer({
           </div>
         </div>
 
-        <div className="flex items-center gap-2 w-full sm:w-auto sm:ml-auto">
-          {hasMore && (
-            <button
-              onClick={handleLoadMore}
-              disabled={loading}
-              className="flex-1 sm:flex-none rounded bg-accent px-4 py-1.5 text-xs font-semibold text-white hover:opacity-90 disabled:opacity-50 transition-opacity cursor-pointer"
-            >
-              {loading ? "Loading..." : "Load 5k More"}
-            </button>
-          )}
+        <div className="flex flex-wrap items-center gap-2.5 w-full sm:w-auto sm:ml-auto">
+          <button
+            onClick={handleLoadMore}
+            disabled={loading || !hasMore}
+            className="flex-1 sm:flex-none rounded bg-accent px-4 py-1.5 text-xs font-semibold text-white transition-opacity disabled:opacity-50 disabled:pointer-events-none cursor-pointer"
+          >
+            {loading ? "Loading..." : hasMore ? "Load 5k More" : "All Trades Loaded"}
+          </button>
+          <span className="text-[10px] text-muted font-mono select-none">
+            ({allTrades.length.toLocaleString()} loaded)
+          </span>
 
           {/* Contextual Export Button (available from Months level and beyond) */}
           {["months", "days", "slots", "trades"].includes(viewLevel) && (
