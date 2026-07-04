@@ -57,7 +57,7 @@ export default async function UserPage({ params }: Props) {
 
       <UserProfileCard profile={profile} address={address} />
 
-      <div className="mt-4 mb-6 flex flex-wrap gap-6">
+      <div className="mt-4 mb-6 flex flex-wrap gap-3 sm:gap-6">
         <StatBadge
           label="Portfolio Value"
           value={formatUsd(portfolioValue)}

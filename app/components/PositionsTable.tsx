@@ -29,9 +29,9 @@ export default function PositionsTable(props: Props) {
         <thead>
           <tr className="border-b border-border text-left text-[10px] uppercase tracking-wider text-muted">
             <th className="pb-2 pr-4 font-medium">Market</th>
-            <th className="pb-2 pr-4 font-medium">Outcome</th>
+            <th className="hidden sm:table-cell pb-2 pr-4 font-medium">Outcome</th>
             <th className="pb-2 pr-4 font-medium text-right">Size</th>
-            <th className="pb-2 pr-4 font-medium text-right">Avg Price</th>
+            <th className="hidden sm:table-cell pb-2 pr-4 font-medium text-right">Avg Price</th>
             {props.type === "current" && (
               <>
                 <th className="pb-2 pr-4 font-medium text-right">Value</th>
@@ -46,21 +46,21 @@ export default function PositionsTable(props: Props) {
         <tbody>
           {props.positions.map((pos, i) => (
             <tr key={pos.asset ?? i} className="border-b border-border/50">
-              <td className="py-2 pr-4">
+              <td className="py-2 pr-4 max-w-[120px] sm:max-w-[200px]">
                 <Link
                   href={`/markets/${pos.conditionId}`}
-                  className="text-accent hover:underline line-clamp-1 max-w-[200px]"
+                  className="text-accent hover:underline truncate block"
                 >
                   {pos.title ?? "Unknown"}
                 </Link>
               </td>
-              <td className="py-2 pr-4 font-mono tabular-nums">
+              <td className="hidden sm:table-cell py-2 pr-4 font-mono tabular-nums">
                 {pos.outcome ?? "-"}
               </td>
               <td className="py-2 pr-4 text-right font-mono tabular-nums">
                 {pos.totalBought?.toFixed(2) ?? "-"}
               </td>
-              <td className="py-2 pr-4 text-right font-mono tabular-nums">
+              <td className="hidden sm:table-cell py-2 pr-4 text-right font-mono tabular-nums">
                 {(pos.avgPrice * 100)?.toFixed(1) ?? "-"}¢
               </td>
               {props.type === "current" && (

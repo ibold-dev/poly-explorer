@@ -116,9 +116,9 @@ export default async function MarketPage({ params }: Props) {
             <thead>
               <tr className="border-b border-border text-left text-[10px] uppercase tracking-wider text-muted">
                 <th className="pb-2 pr-4 font-medium">Trader</th>
-                <th className="pb-2 pr-4 font-medium">Outcome</th>
+                <th className="hidden sm:table-cell pb-2 pr-4 font-medium">Outcome</th>
                 <th className="pb-2 pr-4 font-medium text-right">Size</th>
-                <th className="pb-2 pr-4 font-medium text-right">Avg Price</th>
+                <th className="hidden sm:table-cell pb-2 pr-4 font-medium text-right">Avg Price</th>
                 <th className="pb-2 pr-4 font-medium text-right">Value</th>
                 <th className="pb-2 pr-4 font-medium text-right">PnL</th>
               </tr>
@@ -130,11 +130,11 @@ export default async function MarketPage({ params }: Props) {
                     key={`${meta.token}-${i}`}
                     className="border-b border-border/50"
                   >
-                    <td className="py-2 pr-4">
+                    <td className="py-2 pr-4 max-w-[100px] sm:max-w-none">
                       {pos.name ? (
                         <Link
                           href={`/users/${pos.proxyWallet}`}
-                          className="text-accent hover:underline"
+                          className="text-accent hover:underline truncate block"
                         >
                           {pos.name}
                         </Link>
@@ -144,13 +144,13 @@ export default async function MarketPage({ params }: Props) {
                         </span>
                       )}
                     </td>
-                    <td className="py-2 pr-4 font-mono tabular-nums">
+                    <td className="hidden sm:table-cell py-2 pr-4 font-mono tabular-nums">
                       {pos.outcome ?? "-"}
                     </td>
                     <td className="py-2 pr-4 text-right font-mono tabular-nums">
                       {pos.size?.toFixed(2) ?? "-"}
                     </td>
-                    <td className="py-2 pr-4 text-right font-mono tabular-nums">
+                    <td className="hidden sm:table-cell py-2 pr-4 text-right font-mono tabular-nums">
                       {pos.avgPrice != null
                         ? `${(pos.avgPrice * 100).toFixed(1)}¢`
                         : "-"}

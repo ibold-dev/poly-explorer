@@ -139,7 +139,7 @@ async function LeaderboardTable({
               <td className="py-2 pr-4 font-mono tabular-nums text-muted">
                 {entry.rank ?? "-"}
               </td>
-              <td className="py-2 pr-4">
+              <td className="py-2 pr-4 max-w-[140px] sm:max-w-none">
                 <Link
                   href={`/users/${entry.proxyWallet}`}
                   className="flex items-center gap-2 text-accent hover:underline"
@@ -148,10 +148,10 @@ async function LeaderboardTable({
                     <img
                       src={entry.profileImage}
                       alt=""
-                      className="h-5 w-5 rounded-full object-cover"
+                      className="h-5 w-5 shrink-0 rounded-full object-cover"
                     />
                   )}
-                  <span>
+                  <span className="truncate">
                     {entry.userName ??
                       (entry.proxyWallet
                         ? truncateAddress(entry.proxyWallet)
@@ -163,6 +163,7 @@ async function LeaderboardTable({
                       height="10"
                       viewBox="0 0 24 24"
                       fill="#3b82f6"
+                      className="shrink-0"
                     >
                       <path d="M12 1L3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4z" />
                     </svg>

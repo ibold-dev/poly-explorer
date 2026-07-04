@@ -227,66 +227,70 @@ export default function TradesExplorer({
         </button>
       </div>
 
-      <div className="mb-4 flex flex-wrap items-center gap-3">
+      <div className="mb-4 flex flex-wrap items-center gap-2 sm:gap-3">
         <input
           type="text"
-          placeholder="Filter by market…"
+          placeholder="Filter market…"
           value={marketFilter}
           onChange={(e) => {
             setMarketFilter(e.target.value);
             setCurrentPage(1);
           }}
-          className="rounded border border-border bg-card px-2 py-1 text-xs text-foreground placeholder:text-muted outline-none focus:border-accent w-40"
+          className="rounded border border-border bg-card px-2 py-1 text-xs text-foreground placeholder:text-muted outline-none focus:border-accent w-full sm:w-40"
         />
 
-        <select
-          value={sideFilter}
-          onChange={(e) => {
-            setSideFilter(e.target.value as Side);
-            setCurrentPage(1);
-          }}
-          className="rounded border border-border bg-card px-2 py-1 text-xs text-foreground outline-none focus:border-accent"
-        >
-          <option value="ALL">All Sides</option>
-          <option value="BUY">Buy</option>
-          <option value="SELL">Sell</option>
-        </select>
+        <div className="flex w-full sm:w-auto gap-2 sm:gap-3">
+          <select
+            value={sideFilter}
+            onChange={(e) => {
+              setSideFilter(e.target.value as Side);
+              setCurrentPage(1);
+            }}
+            className="flex-1 sm:flex-none rounded border border-border bg-card px-2 py-1 text-xs text-foreground outline-none focus:border-accent"
+          >
+            <option value="ALL">All Sides</option>
+            <option value="BUY">Buy</option>
+            <option value="SELL">Sell</option>
+          </select>
 
-        <input
-          type="date"
-          value={dateStart}
-          onChange={(e) => {
-            setDateStart(e.target.value);
-            setCurrentPage(1);
-          }}
-          className="rounded border border-border bg-card px-2 py-1 text-xs text-foreground outline-none focus:border-accent"
-        />
-        <span className="text-[10px] text-muted">to</span>
-        <input
-          type="date"
-          value={dateEnd}
-          onChange={(e) => {
-            setDateEnd(e.target.value);
-            setCurrentPage(1);
-          }}
-          className="rounded border border-border bg-card px-2 py-1 text-xs text-foreground outline-none focus:border-accent"
-        />
+          <select
+            value={groupBy}
+            onChange={(e) => {
+              setGroupBy(e.target.value as GroupBy);
+              setCurrentPage(1);
+            }}
+            className="flex-1 sm:flex-none rounded border border-border bg-card px-2 py-1 text-xs text-foreground outline-none focus:border-accent"
+          >
+            <option value="minute">Minute</option>
+            <option value="hour">Hour</option>
+            <option value="day">Day</option>
+            <option value="week">Week</option>
+            <option value="month">Month</option>
+            <option value="year">Year</option>
+          </select>
+        </div>
 
-        <select
-          value={groupBy}
-          onChange={(e) => {
-            setGroupBy(e.target.value as GroupBy);
-            setCurrentPage(1);
-          }}
-          className="rounded border border-border bg-card px-2 py-1 text-xs text-foreground outline-none focus:border-accent"
-        >
-          <option value="minute">Minute</option>
-          <option value="hour">Hour</option>
-          <option value="day">Day</option>
-          <option value="week">Week</option>
-          <option value="month">Month</option>
-          <option value="year">Year</option>
-        </select>
+        <div className="flex w-full sm:w-auto items-center gap-2">
+          <input
+            type="date"
+            value={dateStart}
+            onChange={(e) => {
+              setDateStart(e.target.value);
+              setCurrentPage(1);
+            }}
+            className="flex-1 sm:flex-none rounded border border-border bg-card px-2 py-1 text-xs text-foreground outline-none focus:border-accent min-w-0"
+          />
+          <span className="text-[10px] text-muted shrink-0">to</span>
+          <input
+            type="date"
+            value={dateEnd}
+            onChange={(e) => {
+              setDateEnd(e.target.value);
+              setCurrentPage(1);
+            }}
+            className="flex-1 sm:flex-none rounded border border-border bg-card px-2 py-1 text-xs text-foreground outline-none focus:border-accent min-w-0"
+          />
+        </div>
       </div>
 
       <div className="mb-4 flex items-center gap-4 text-xs text-muted">
@@ -316,24 +320,24 @@ export default function TradesExplorer({
           <div key={group.label}>
             <button
               onClick={() => toggleGroup(group.label)}
-              className="flex w-full items-center justify-between rounded border border-border bg-card px-3 py-2 text-left hover:bg-card-hover transition-colors"
+              className="flex w-full items-center justify-between rounded border border-border bg-card px-2 sm:px-3 py-2 text-left hover:bg-card-hover transition-colors gap-2"
             >
-              <div className="flex items-center gap-3">
+              <div className="flex items-center gap-1.5 sm:gap-3 min-w-0">
                 <span
-                  className={`text-[10px] transition-transform ${
+                  className={`text-[10px] shrink-0 transition-transform ${
                     expandedGroups.has(group.label) ? "rotate-90" : ""
                   }`}
                 >
                   ▶
                 </span>
-                <span className="text-xs font-medium text-foreground">
+                <span className="text-xs font-medium text-foreground truncate">
                   {group.label}
                 </span>
-                <span className="text-[10px] text-muted">
-                  {group.tradeCount} trade{group.tradeCount !== 1 ? "s" : ""}
+                <span className="text-[10px] text-muted shrink-0">
+                  {group.tradeCount}
                 </span>
               </div>
-              <div className="flex items-center gap-4 text-xs font-mono tabular-nums">
+              <div className="flex items-center gap-2 sm:gap-4 text-xs font-mono tabular-nums shrink-0">
                 <span className="text-muted">
                   {formatUsd(group.totalVolume)}
                 </span>
@@ -351,19 +355,19 @@ export default function TradesExplorer({
 
             {expandedGroups.has(group.label) && (
               <div className="overflow-x-auto">
-                <table className="w-full text-xs">
+                  <table className="w-full text-xs">
                   <thead>
                     <tr className="text-left text-[10px] uppercase tracking-wider text-muted">
-                      <th className="px-3 py-1.5 font-medium">Time</th>
-                      <th className="px-3 py-1.5 font-medium">Market</th>
-                      <th className="px-3 py-1.5 font-medium">Side</th>
-                      <th className="px-3 py-1.5 font-medium text-right">
+                      <th className="px-2 sm:px-3 py-1.5 font-medium">Time</th>
+                      <th className="hidden sm:table-cell px-2 sm:px-3 py-1.5 font-medium">Market</th>
+                      <th className="px-2 sm:px-3 py-1.5 font-medium">Side</th>
+                      <th className="px-2 sm:px-3 py-1.5 font-medium text-right">
                         Size
                       </th>
-                      <th className="px-3 py-1.5 font-medium text-right">
+                      <th className="hidden sm:table-cell px-2 sm:px-3 py-1.5 font-medium text-right">
                         Price
                       </th>
-                      <th className="px-3 py-1.5 font-medium text-right">
+                      <th className="px-2 sm:px-3 py-1.5 font-medium text-right">
                         Total
                       </th>
                     </tr>
@@ -374,16 +378,16 @@ export default function TradesExplorer({
                         key={trade.transactionHash ?? i}
                         className="border-b border-border/30"
                       >
-                        <td className="px-3 py-1.5 text-muted font-mono tabular-nums whitespace-nowrap">
+                        <td className="px-2 sm:px-3 py-1.5 text-muted font-mono tabular-nums whitespace-nowrap text-[11px] sm:text-xs">
                           {trade.timestamp
                             ? formatDateTime(trade.timestamp)
                             : "-"}
                         </td>
-                        <td className="px-3 py-1.5 max-w-[200px] truncate">
+                        <td className="hidden sm:table-cell px-2 sm:px-3 py-1.5 max-w-[200px] truncate">
                           {trade.title ?? "Unknown"}
                         </td>
                         <td
-                          className={`px-3 py-1.5 font-medium ${
+                          className={`px-2 sm:px-3 py-1.5 font-medium text-[11px] sm:text-xs ${
                             trade.side === "BUY"
                               ? "text-profit"
                               : trade.side === "SELL"
@@ -393,15 +397,15 @@ export default function TradesExplorer({
                         >
                           {trade.side ?? "-"}
                         </td>
-                        <td className="px-3 py-1.5 text-right font-mono tabular-nums">
+                        <td className="px-2 sm:px-3 py-1.5 text-right font-mono tabular-nums text-[11px] sm:text-xs">
                           {trade.size?.toFixed(2) ?? "-"}
                         </td>
-                        <td className="px-3 py-1.5 text-right font-mono tabular-nums">
+                        <td className="hidden sm:table-cell px-2 sm:px-3 py-1.5 text-right font-mono tabular-nums">
                           {trade.price != null
                             ? `${(trade.price * 100).toFixed(1)}¢`
                             : "-"}
                         </td>
-                        <td className="px-3 py-1.5 text-right font-mono tabular-nums">
+                        <td className="px-2 sm:px-3 py-1.5 text-right font-mono tabular-nums text-[11px] sm:text-xs">
                           {trade.size != null && trade.price != null
                             ? formatUsd(trade.size * trade.price)
                             : "-"}

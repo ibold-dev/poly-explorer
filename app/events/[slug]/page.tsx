@@ -42,7 +42,7 @@ export default async function EventPage({ params }: Props) {
           <img
             src={event.image}
             alt=""
-            className="mb-4 h-48 w-full rounded-lg object-cover"
+            className="mb-4 h-32 sm:h-48 w-full rounded-lg object-cover"
           />
         )}
         <h1 className="text-2xl font-bold text-foreground">
