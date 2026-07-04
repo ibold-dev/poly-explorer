@@ -125,6 +125,11 @@ export default function TradesExplorer({
   const [selectedDay, setSelectedDay] = useState<string | null>(null); // "yyyy-MM-dd"
   const [selectedSlot, setSelectedSlot] = useState<TimeSlot | null>(null);
 
+  // Multi-Select Sets for level-by-level exports
+  const [selectedMonths, setSelectedMonths] = useState<Set<string>>(new Set());
+  const [selectedDays, setSelectedDays] = useState<Set<string>>(new Set());
+  const [selectedSlots, setSelectedSlots] = useState<Set<string>>(new Set()); // unique: `${selectedDay}_${slot.key}`
+
   // General Filter options (persist through levels)
   const [marketFilter, setMarketFilter] = useState("");
   const [sideFilter, setSideFilter] = useState<Side>("ALL");
@@ -374,22 +379,72 @@ export default function TradesExplorer({
     }
   }, [userAddress]);
 
+  // Consolidated JSON download builder
   const handleExport = useCallback(() => {
+    let tradesToExport: Trade[] = [];
+    let exportLabel = "";
+
+    if (viewLevel === "months") {
+      if (selectedMonths.size > 0) {
+        tradesToExport = periodFilteredTrades.filter((t) => {
+          if (!t.timestamp) return false;
+          const d = new Date(t.timestamp * 1000);
+          const mKey = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+          return selectedMonths.has(mKey);
+        });
+        exportLabel = `${selectedAsset.toLowerCase()}-${selectedMonths.size}-months`;
+      } else {
+        tradesToExport = periodFilteredTrades;
+        exportLabel = `${selectedAsset.toLowerCase()}-all-months`;
+      }
+    } else if (viewLevel === "days") {
+      if (selectedDays.size > 0) {
+        tradesToExport = monthFilteredTrades.filter((t) => {
+          if (!t.timestamp) return false;
+          const d = new Date(t.timestamp * 1000);
+          const dKey = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+          return selectedDays.has(dKey);
+        });
+        exportLabel = `${selectedAsset.toLowerCase()}-${selectedMonth}-${selectedDays.size}-days`;
+      } else {
+        tradesToExport = monthFilteredTrades;
+        exportLabel = `${selectedAsset.toLowerCase()}-${selectedMonth}-all-days`;
+      }
+    } else if (viewLevel === "slots") {
+      if (selectedSlots.size > 0) {
+        tradesToExport = dayFilteredTrades.filter((t) => {
+          if (!t.timestamp) return false;
+          const slot = getTradeSlot(t.timestamp, selectedPeriod);
+          const slotKey = `${selectedDay}_${slot.key}`;
+          return selectedSlots.has(slotKey);
+        });
+        exportLabel = `${selectedAsset.toLowerCase()}-${selectedDay}-${selectedSlots.size}-slots`;
+      } else {
+        tradesToExport = dayFilteredTrades;
+        exportLabel = `${selectedAsset.toLowerCase()}-${selectedDay}-all-slots`;
+      }
+    } else if (viewLevel === "trades") {
+      tradesToExport = activeDetailTrades;
+      exportLabel = `${selectedAsset.toLowerCase()}-${selectedDay}-${selectedSlot?.key || "slot"}`;
+    } else {
+      // Assets / Periods Level
+      tradesToExport = filteredTrades;
+      exportLabel = `${selectedAsset.toLowerCase()}-export`;
+    }
+
     const exportData = {
       user: userAddress,
-      filters: {
+      metadata: {
         asset: selectedAsset,
         period: selectedPeriod,
         month: selectedMonth,
         day: selectedDay,
         slot: selectedSlot?.label,
-        market: marketFilter || "ALL",
-        side: sideFilter,
-        dateRange:
-          dateStart || dateEnd ? `${dateStart || "..."} – ${dateEnd || "..."}` : "ALL",
+        level: viewLevel,
+        exportedCount: tradesToExport.length,
+        exportedAt: new Date().toISOString(),
       },
-      trades: activeDetailTrades,
-      exportedAt: new Date().toISOString(),
+      trades: tradesToExport,
     };
 
     const blob = new Blob([JSON.stringify(exportData, null, 2)], {
@@ -398,20 +453,24 @@ export default function TradesExplorer({
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `trades-${selectedAsset.toLowerCase()}-${selectedPeriod.toLowerCase()}-${selectedDay || "export"}.json`;
+    a.download = `trades-${exportLabel}-${userAddress.slice(0, 8)}.json`;
     a.click();
     URL.revokeObjectURL(url);
   }, [
+    viewLevel,
     userAddress,
     selectedAsset,
     selectedPeriod,
     selectedMonth,
     selectedDay,
     selectedSlot,
-    marketFilter,
-    sideFilter,
-    dateStart,
-    dateEnd,
+    selectedMonths,
+    selectedDays,
+    selectedSlots,
+    filteredTrades,
+    periodFilteredTrades,
+    monthFilteredTrades,
+    dayFilteredTrades,
     activeDetailTrades,
   ]);
 
@@ -425,20 +484,32 @@ export default function TradesExplorer({
       setSelectedMonth(null);
       setSelectedDay(null);
       setSelectedSlot(null);
+      setSelectedMonths(new Set());
+      setSelectedDays(new Set());
+      setSelectedSlots(new Set());
     } else if (level === "periods") {
       setSelectedPeriod("ALL");
       setSelectedMonth(null);
       setSelectedDay(null);
       setSelectedSlot(null);
+      setSelectedMonths(new Set());
+      setSelectedDays(new Set());
+      setSelectedSlots(new Set());
     } else if (level === "months") {
       setSelectedMonth(null);
       setSelectedDay(null);
       setSelectedSlot(null);
+      setSelectedMonths(new Set());
+      setSelectedDays(new Set());
+      setSelectedSlots(new Set());
     } else if (level === "days") {
       setSelectedDay(null);
       setSelectedSlot(null);
+      setSelectedDays(new Set());
+      setSelectedSlots(new Set());
     } else if (level === "slots") {
       setSelectedSlot(null);
+      setSelectedSlots(new Set());
     }
   };
 
@@ -472,13 +543,91 @@ export default function TradesExplorer({
     setViewLevel("trades");
   };
 
+  // Selection toggle callbacks
+  const toggleMonthSelection = (mKey: string) => {
+    setSelectedMonths((prev) => {
+      const next = new Set(prev);
+      if (next.has(mKey)) next.delete(mKey);
+      else next.add(mKey);
+      return next;
+    });
+  };
+
+  const toggleAllMonths = () => {
+    const allKeys = monthsData.map((m) => m.key);
+    const allSelected = allKeys.every((k) => selectedMonths.has(k));
+    if (allSelected) {
+      setSelectedMonths(new Set());
+    } else {
+      setSelectedMonths(new Set(allKeys));
+    }
+  };
+
+  const toggleDaySelection = (dKey: string) => {
+    setSelectedDays((prev) => {
+      const next = new Set(prev);
+      if (next.has(dKey)) next.delete(dKey);
+      else next.add(dKey);
+      return next;
+    });
+  };
+
+  const toggleAllDays = () => {
+    const allKeys = daysData.map((d) => d.key);
+    const allSelected = allKeys.every((k) => selectedDays.has(k));
+    if (allSelected) {
+      setSelectedDays(new Set());
+    } else {
+      setSelectedDays(new Set(allKeys));
+    }
+  };
+
+  const toggleSlotSelection = (slotKey: string) => {
+    setSelectedSlots((prev) => {
+      const next = new Set(prev);
+      if (next.has(slotKey)) next.delete(slotKey);
+      else next.add(slotKey);
+      return next;
+    });
+  };
+
+  const toggleAllSlots = () => {
+    const allKeys = slotsData.map((s) => `${selectedDay}_${s.slot.key}`);
+    const allSelected = allKeys.every((k) => selectedSlots.has(k));
+    if (allSelected) {
+      setSelectedSlots(new Set());
+    } else {
+      setSelectedSlots(new Set(allKeys));
+    }
+  };
+
+  // Calculated exports button labeling
+  const exportButtonText = useMemo(() => {
+    if (viewLevel === "months") {
+      return selectedMonths.size > 0
+        ? `Download JSON (${selectedMonths.size} Month(s))`
+        : "Download JSON (All Months)";
+    }
+    if (viewLevel === "days") {
+      return selectedDays.size > 0
+        ? `Download JSON (${selectedDays.size} Day(s))`
+        : "Download JSON (All Days)";
+    }
+    if (viewLevel === "slots") {
+      return selectedSlots.size > 0
+        ? `Download JSON (${selectedSlots.size} Slot(s))`
+        : "Download JSON (All Slots)";
+    }
+    return "Download JSON";
+  }, [viewLevel, selectedMonths, selectedDays, selectedSlots]);
+
   return (
     <div className="space-y-6">
       {/* Breadcrumb path navigation */}
       <div className="flex flex-wrap items-center gap-1.5 text-xs text-muted select-none border-b border-border/40 pb-2">
         <button
           onClick={() => navigateToLevel("assets")}
-          className="hover:text-foreground transition-colors font-medium"
+          className="hover:text-foreground transition-colors font-medium cursor-pointer"
         >
           All Categories
         </button>
@@ -489,7 +638,7 @@ export default function TradesExplorer({
               onClick={() =>
                 navigateToLevel(selectedAsset === "GENERAL" ? "months" : "periods")
               }
-              className="hover:text-foreground transition-colors font-medium text-accent"
+              className="hover:text-foreground transition-colors font-medium text-accent cursor-pointer"
             >
               {selectedAsset}
             </button>
@@ -500,7 +649,7 @@ export default function TradesExplorer({
             <span className="text-zinc-600">/</span>
             <button
               onClick={() => navigateToLevel("months")}
-              className="hover:text-foreground transition-colors font-medium text-purple-400"
+              className="hover:text-foreground transition-colors font-medium text-purple-400 cursor-pointer"
             >
               {selectedPeriod} Markets
             </button>
@@ -511,7 +660,7 @@ export default function TradesExplorer({
             <span className="text-zinc-600">/</span>
             <button
               onClick={() => navigateToLevel("days")}
-              className="hover:text-foreground transition-colors font-medium"
+              className="hover:text-foreground transition-colors font-medium cursor-pointer"
             >
               {formatHumanMonth(selectedMonth)}
             </button>
@@ -522,7 +671,7 @@ export default function TradesExplorer({
             <span className="text-zinc-600">/</span>
             <button
               onClick={() => navigateToLevel("slots")}
-              className="hover:text-foreground transition-colors font-medium"
+              className="hover:text-foreground transition-colors font-medium cursor-pointer"
             >
               {formatHumanDate(selectedDay)}
             </button>
@@ -583,7 +732,7 @@ export default function TradesExplorer({
               setMarketFilter(e.target.value);
               setCurrentPage(1);
             }}
-            className="rounded border border-border bg-card px-3 py-1.5 text-xs text-foreground placeholder:text-muted outline-none focus:border-accent w-full sm:w-56"
+            className="rounded border border-border bg-card px-3 py-1.5 text-xs text-foreground placeholder:text-muted outline-none focus:border-accent w-full sm:w-56 cursor-text"
           />
 
           <div className="flex w-full sm:w-auto gap-2">
@@ -593,7 +742,7 @@ export default function TradesExplorer({
                 setSideFilter(e.target.value as Side);
                 setCurrentPage(1);
               }}
-              className="rounded border border-border bg-card px-3 py-1.5 text-xs text-foreground outline-none focus:border-accent"
+              className="rounded border border-border bg-card px-3 py-1.5 text-xs text-foreground outline-none focus:border-accent cursor-pointer"
             >
               <option value="ALL">All Sides</option>
               <option value="BUY">Buy Only</option>
@@ -609,7 +758,7 @@ export default function TradesExplorer({
                 setDateStart(e.target.value);
                 setCurrentPage(1);
               }}
-              className="rounded border border-border bg-card px-3 py-1.5 text-xs text-foreground outline-none focus:border-accent"
+              className="rounded border border-border bg-card px-3 py-1.5 text-xs text-foreground outline-none focus:border-accent cursor-pointer"
             />
             <span className="text-[10px] text-muted font-mono shrink-0">to</span>
             <input
@@ -619,7 +768,7 @@ export default function TradesExplorer({
                 setDateEnd(e.target.value);
                 setCurrentPage(1);
               }}
-              className="rounded border border-border bg-card px-3 py-1.5 text-xs text-foreground outline-none focus:border-accent"
+              className="rounded border border-border bg-card px-3 py-1.5 text-xs text-foreground outline-none focus:border-accent cursor-pointer"
             />
           </div>
         </div>
@@ -629,9 +778,19 @@ export default function TradesExplorer({
             <button
               onClick={handleLoadMore}
               disabled={loading}
-              className="flex-1 sm:flex-none rounded bg-accent px-4 py-1.5 text-xs font-semibold text-white hover:opacity-90 disabled:opacity-50 transition-opacity"
+              className="flex-1 sm:flex-none rounded bg-accent px-4 py-1.5 text-xs font-semibold text-white hover:opacity-90 disabled:opacity-50 transition-opacity cursor-pointer"
             >
               {loading ? "Loading..." : "Load 5k More"}
+            </button>
+          )}
+
+          {/* Contextual Export Button (available from Months level and beyond) */}
+          {["months", "days", "slots", "trades"].includes(viewLevel) && (
+            <button
+              onClick={handleExport}
+              className="flex-1 sm:flex-none rounded bg-card border border-border px-4 py-1.5 text-xs font-semibold text-foreground hover:bg-card-hover transition-colors cursor-pointer"
+            >
+              {exportButtonText}
             </button>
           )}
         </div>
@@ -652,15 +811,15 @@ export default function TradesExplorer({
                 <button
                   key={cat}
                   onClick={() => handleAssetClick(cat)}
-                  className="flex flex-col rounded-xl border border-border bg-card/60 p-4 text-left hover:bg-card-hover hover:border-muted transition-all duration-200 group"
+                  className="flex flex-col rounded-xl border border-border bg-card/60 p-4 text-left hover:bg-card-hover hover:border-muted transition-all duration-200 group cursor-pointer"
                 >
-                  <span className="text-xs font-bold tracking-wider text-muted group-hover:text-accent transition-colors">
+                  <span className="text-xs font-bold tracking-wider text-muted group-hover:text-accent transition-colors cursor-pointer">
                     {cat}
                   </span>
-                  <span className="mt-3 text-2xl font-mono font-bold tabular-nums text-foreground">
+                  <span className="mt-3 text-2xl font-mono font-bold tabular-nums text-foreground cursor-pointer">
                     {stats.count.toLocaleString()}
                   </span>
-                  <span className="text-[10px] font-mono text-muted tabular-nums mt-0.5">
+                  <span className="text-[10px] font-mono text-muted tabular-nums mt-0.5 cursor-pointer">
                     {formatUsdCompact(stats.volume)} Vol
                   </span>
                 </button>
@@ -676,11 +835,11 @@ export default function TradesExplorer({
           <div className="flex items-center gap-2">
             <button
               onClick={() => navigateToLevel("assets")}
-              className="text-xs text-accent hover:underline"
+              className="text-xs text-accent hover:underline cursor-pointer font-medium"
             >
               ← Back
             </button>
-            <h3 className="text-xs font-bold uppercase tracking-wider text-muted">
+            <h3 className="text-xs font-bold uppercase tracking-wider text-muted select-none">
               Select Period Duration for {selectedAsset}
             </h3>
           </div>
@@ -696,10 +855,10 @@ export default function TradesExplorer({
                 <button
                   key={pd.id}
                   onClick={() => handlePeriodClick(pd.id)}
-                  className="flex flex-col rounded-xl border border-border bg-card/60 p-4 text-left hover:bg-card-hover hover:border-muted transition-all duration-200"
+                  className="flex flex-col rounded-xl border border-border bg-card/60 p-4 text-left hover:bg-card-hover hover:border-muted transition-all duration-200 cursor-pointer"
                 >
-                  <span className="text-xs font-bold text-foreground">{pd.label}</span>
-                  <span className="text-[10px] text-muted mt-2">
+                  <span className="text-xs font-bold text-foreground cursor-pointer">{pd.label}</span>
+                  <span className="text-[10px] text-muted mt-2 cursor-pointer">
                     Click to drill down into months
                   </span>
                 </button>
@@ -712,36 +871,77 @@ export default function TradesExplorer({
       {/* LEVEL 3: MONTHS GRID */}
       {viewLevel === "months" && (
         <div className="space-y-4">
-          <div className="flex items-center gap-2">
-            <button
-              onClick={() =>
-                navigateToLevel(selectedAsset === "GENERAL" ? "assets" : "periods")
-              }
-              className="text-xs text-accent hover:underline"
-            >
-              ← Back
-            </button>
-            <h3 className="text-xs font-bold uppercase tracking-wider text-muted">Select Month</h3>
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <button
+                onClick={() =>
+                  navigateToLevel(selectedAsset === "GENERAL" ? "assets" : "periods")
+                }
+                className="text-xs text-accent hover:underline cursor-pointer font-medium"
+              >
+                ← Back
+              </button>
+              <h3 className="text-xs font-bold uppercase tracking-wider text-muted select-none">
+                Select Month
+              </h3>
+            </div>
+
+            {monthsData.length > 0 && (
+              <button
+                onClick={toggleAllMonths}
+                className="rounded border border-border bg-card px-3 py-1.5 text-xs font-semibold text-foreground hover:bg-card-hover cursor-pointer select-none transition-colors"
+              >
+                {monthsData.every((m) => selectedMonths.has(m.key))
+                  ? "Deselect All"
+                  : "Select All"}
+              </button>
+            )}
           </div>
+
           {monthsData.length === 0 ? (
-            <p className="text-xs text-muted py-4">No active months found for this category.</p>
+            <p className="text-xs text-muted py-4 select-none">
+              No active months found for this category.
+            </p>
           ) : (
             <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-6">
-              {monthsData.map((m) => (
-                <button
-                  key={m.key}
-                  onClick={() => handleMonthClick(m.key)}
-                  className="flex flex-col rounded-xl border border-border bg-card/60 p-4 text-left hover:bg-card-hover hover:border-muted transition-all duration-200 font-mono"
-                >
-                  <span className="text-xs font-bold text-foreground">
-                    {formatHumanMonth(m.key)}
-                  </span>
-                  <span className="text-lg font-bold text-accent mt-2">
-                    {m.count.toLocaleString()}
-                  </span>
-                  <span className="text-[10px] text-muted">{formatUsdCompact(m.volume)} Vol</span>
-                </button>
-              ))}
+              {monthsData.map((m) => {
+                const isSelected = selectedMonths.has(m.key);
+                return (
+                  <div key={m.key} className="relative group select-none">
+                    {/* Selection Checkbox */}
+                    <div
+                      className="absolute top-3.5 right-3.5 z-10 cursor-pointer"
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={isSelected}
+                        onChange={() => toggleMonthSelection(m.key)}
+                        className="h-4.5 w-4.5 rounded border-border bg-zinc-900 text-accent outline-none cursor-pointer"
+                      />
+                    </div>
+
+                    <button
+                      onClick={() => handleMonthClick(m.key)}
+                      className={`flex flex-col w-full rounded-xl border p-4 text-left transition-all duration-200 font-mono cursor-pointer ${
+                        isSelected
+                          ? "border-accent bg-accent/5 shadow-md shadow-accent/5"
+                          : "border-border bg-card/60 hover:bg-card-hover hover:border-muted"
+                      }`}
+                    >
+                      <span className="text-xs font-bold text-foreground cursor-pointer">
+                        {formatHumanMonth(m.key)}
+                      </span>
+                      <span className="text-lg font-bold text-accent mt-2 cursor-pointer">
+                        {m.count.toLocaleString()}
+                      </span>
+                      <span className="text-[10px] text-muted cursor-pointer">
+                        {formatUsdCompact(m.volume)} Vol
+                      </span>
+                    </button>
+                  </div>
+                );
+              })}
             </div>
           )}
         </div>
@@ -750,34 +950,73 @@ export default function TradesExplorer({
       {/* LEVEL 4: DAYS GRID */}
       {viewLevel === "days" && (
         <div className="space-y-4">
-          <div className="flex items-center gap-2">
-            <button
-              onClick={() => navigateToLevel("months")}
-              className="text-xs text-accent hover:underline"
-            >
-              ← Back
-            </button>
-            <h3 className="text-xs font-bold uppercase tracking-wider text-muted">Select Day</h3>
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <button
+                onClick={() => navigateToLevel("months")}
+                className="text-xs text-accent hover:underline cursor-pointer font-medium"
+              >
+                ← Back
+              </button>
+              <h3 className="text-xs font-bold uppercase tracking-wider text-muted select-none">
+                Select Day
+              </h3>
+            </div>
+
+            {daysData.length > 0 && (
+              <button
+                onClick={toggleAllDays}
+                className="rounded border border-border bg-card px-3 py-1.5 text-xs font-semibold text-foreground hover:bg-card-hover cursor-pointer select-none transition-colors"
+              >
+                {daysData.every((d) => selectedDays.has(d.key)) ? "Deselect All" : "Select All"}
+              </button>
+            )}
           </div>
+
           {daysData.length === 0 ? (
-            <p className="text-xs text-muted py-4">No active days found for this month.</p>
+            <p className="text-xs text-muted py-4 select-none">
+              No active days found for this month.
+            </p>
           ) : (
             <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-6">
-              {daysData.map((d) => (
-                <button
-                  key={d.key}
-                  onClick={() => handleDayClick(d.key)}
-                  className="flex flex-col rounded-xl border border-border bg-card/60 p-4 text-left hover:bg-card-hover hover:border-muted transition-all duration-200 font-mono"
-                >
-                  <span className="text-xs font-bold text-foreground">
-                    {formatHumanDate(d.key)}
-                  </span>
-                  <span className="text-lg font-bold text-accent mt-2">
-                    {d.count.toLocaleString()}
-                  </span>
-                  <span className="text-[10px] text-muted">{formatUsdCompact(d.volume)} Vol</span>
-                </button>
-              ))}
+              {daysData.map((d) => {
+                const isSelected = selectedDays.has(d.key);
+                return (
+                  <div key={d.key} className="relative group select-none">
+                    {/* Selection Checkbox */}
+                    <div
+                      className="absolute top-3.5 right-3.5 z-10 cursor-pointer"
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={isSelected}
+                        onChange={() => toggleDaySelection(d.key)}
+                        className="h-4.5 w-4.5 rounded border-border bg-zinc-900 text-accent outline-none cursor-pointer"
+                      />
+                    </div>
+
+                    <button
+                      onClick={() => handleDayClick(d.key)}
+                      className={`flex flex-col w-full rounded-xl border p-4 text-left transition-all duration-200 font-mono cursor-pointer ${
+                        isSelected
+                          ? "border-accent bg-accent/5 shadow-md shadow-accent/5"
+                          : "border-border bg-card/60 hover:bg-card-hover hover:border-muted"
+                      }`}
+                    >
+                      <span className="text-xs font-bold text-foreground cursor-pointer">
+                        {formatHumanDate(d.key)}
+                      </span>
+                      <span className="text-lg font-bold text-accent mt-2 cursor-pointer">
+                        {d.count.toLocaleString()}
+                      </span>
+                      <span className="text-[10px] text-muted cursor-pointer">
+                        {formatUsdCompact(d.volume)} Vol
+                      </span>
+                    </button>
+                  </div>
+                );
+              })}
             </div>
           )}
         </div>
@@ -786,36 +1025,76 @@ export default function TradesExplorer({
       {/* LEVEL 5: TIME SLOTS */}
       {viewLevel === "slots" && (
         <div className="space-y-4">
-          <div className="flex items-center gap-2">
-            <button
-              onClick={() => navigateToLevel("days")}
-              className="text-xs text-accent hover:underline"
-            >
-              ← Back
-            </button>
-            <h3 className="text-xs font-bold uppercase tracking-wider text-muted">
-              Select Time Bracket
-            </h3>
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <button
+                onClick={() => navigateToLevel("days")}
+                className="text-xs text-accent hover:underline cursor-pointer font-medium"
+              >
+                ← Back
+              </button>
+              <h3 className="text-xs font-bold uppercase tracking-wider text-muted select-none">
+                Select Time Bracket
+              </h3>
+            </div>
+
+            {slotsData.length > 0 && (
+              <button
+                onClick={toggleAllSlots}
+                className="rounded border border-border bg-card px-3 py-1.5 text-xs font-semibold text-foreground hover:bg-card-hover cursor-pointer select-none transition-colors"
+              >
+                {slotsData.every((s) => selectedSlots.has(`${selectedDay}_${s.slot.key}`))
+                  ? "Deselect All"
+                  : "Select All"}
+              </button>
+            )}
           </div>
+
           {slotsData.length === 0 ? (
-            <p className="text-xs text-muted py-4">No slots active on this day.</p>
+            <p className="text-xs text-muted py-4 select-none">No slots active on this day.</p>
           ) : (
             <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
-              {slotsData.map((s) => (
-                <button
-                  key={s.slot.key}
-                  onClick={() => handleSlotClick(s.slot)}
-                  className="flex items-center justify-between rounded-xl border border-border bg-card/60 p-4 hover:bg-card-hover hover:border-muted transition-all duration-200"
-                >
-                  <span className="text-xs font-bold text-foreground font-mono">{s.label}</span>
-                  <div className="text-right font-mono">
-                    <span className="rounded bg-accent/15 px-2 py-0.5 text-[10px] font-bold text-accent">
-                      {s.count} trades
-                    </span>
-                    <p className="text-[10px] text-muted mt-1">{formatUsdCompact(s.volume)}</p>
+              {slotsData.map((s) => {
+                const itemKey = `${selectedDay}_${s.slot.key}`;
+                const isSelected = selectedSlots.has(itemKey);
+                return (
+                  <div key={s.slot.key} className="relative group select-none flex items-center">
+                    {/* Selection Checkbox (aligned left) */}
+                    <div
+                      className="pl-4 pr-1.5 z-10 cursor-pointer"
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={isSelected}
+                        onChange={() => toggleSlotSelection(itemKey)}
+                        className="h-4.5 w-4.5 rounded border-border bg-zinc-900 text-accent outline-none cursor-pointer"
+                      />
+                    </div>
+
+                    <button
+                      onClick={() => handleSlotClick(s.slot)}
+                      className={`flex flex-1 items-center justify-between rounded-xl border p-4 hover:bg-card-hover transition-all duration-200 cursor-pointer ${
+                        isSelected
+                          ? "border-accent bg-accent/5 shadow-md shadow-accent/5"
+                          : "border-border bg-card/60 hover:border-muted"
+                      }`}
+                    >
+                      <span className="text-xs font-bold text-foreground font-mono cursor-pointer">
+                        {s.label}
+                      </span>
+                      <div className="text-right font-mono cursor-pointer">
+                        <span className="rounded bg-accent/15 px-2 py-0.5 text-[10px] font-bold text-accent cursor-pointer">
+                          {s.count} trades
+                        </span>
+                        <p className="text-[10px] text-muted mt-1 cursor-pointer">
+                          {formatUsdCompact(s.volume)}
+                        </p>
+                      </div>
+                    </button>
                   </div>
-                </button>
-              ))}
+                );
+              })}
             </div>
           )}
         </div>
@@ -824,39 +1103,22 @@ export default function TradesExplorer({
       {/* LEVEL 6: TRADES TABLE LOG */}
       {viewLevel === "trades" && (
         <div className="space-y-4">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <button
-                onClick={() => navigateToLevel("slots")}
-                className="text-xs text-accent hover:underline font-semibold"
-              >
-                ← Back to slots
-              </button>
-            </div>
-            <button
-              onClick={handleExport}
-              className="rounded bg-card border border-border px-4 py-1.5 text-xs font-semibold text-foreground hover:bg-card-hover transition-colors"
-            >
-              Download JSON
-            </button>
-          </div>
-
-          <div className="flex items-center justify-between text-xs text-muted border-t border-border pt-4">
-            <span>
+          <div className="flex items-center justify-between border-t border-border pt-4">
+            <span className="text-xs text-muted select-none">
               Page {currentPage} of {totalPages} (showing {activeDetailTrades.length} trades in slot)
             </span>
             <div className="flex gap-1.5">
               <button
                 onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
                 disabled={currentPage <= 1}
-                className="rounded bg-card border border-border px-3 py-1 text-xs disabled:opacity-30 hover:bg-card-hover transition-colors"
+                className="rounded bg-card border border-border px-3 py-1 text-xs disabled:opacity-30 hover:bg-card-hover transition-colors cursor-pointer"
               >
                 Prev
               </button>
               <button
                 onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
                 disabled={currentPage >= totalPages}
-                className="rounded bg-card border border-border px-3 py-1 text-xs disabled:opacity-30 hover:bg-card-hover transition-colors"
+                className="rounded bg-card border border-border px-3 py-1 text-xs disabled:opacity-30 hover:bg-card-hover transition-colors cursor-pointer"
               >
                 Next
               </button>
@@ -865,15 +1127,19 @@ export default function TradesExplorer({
 
           <div className="overflow-hidden rounded-xl border border-border bg-card">
             <div className="overflow-x-auto custom-scrollbar">
-              <table className="w-full text-xs">
+              <table className="w-full text-xs select-text">
                 <thead>
                   <tr className="text-left text-[9px] uppercase tracking-wider text-muted border-b border-border/40 bg-card/40">
-                    <th className="pl-4 pr-3 py-2.5 font-medium">Time (Local)</th>
-                    <th className="hidden sm:table-cell px-3 py-2.5 font-medium">Market</th>
-                    <th className="px-3 py-2.5 font-medium">Side</th>
-                    <th className="px-3 py-2.5 font-medium text-right">Shares</th>
-                    <th className="hidden sm:table-cell px-3 py-2.5 font-medium text-right">Price</th>
-                    <th className="pr-4 pl-3 py-2.5 font-medium text-right">Total</th>
+                    <th className="pl-4 pr-3 py-2.5 font-medium select-none">Time (Local)</th>
+                    <th className="hidden sm:table-cell px-3 py-2.5 font-medium select-none">
+                      Market
+                    </th>
+                    <th className="px-3 py-2.5 font-medium select-none">Side</th>
+                    <th className="px-3 py-2.5 font-medium text-right select-none">Shares</th>
+                    <th className="hidden sm:table-cell px-3 py-2.5 font-medium text-right select-none">
+                      Price
+                    </th>
+                    <th className="pr-4 pl-3 py-2.5 font-medium text-right select-none">Total</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -925,5 +1191,3 @@ export default function TradesExplorer({
     </div>
   );
 }
-
-
