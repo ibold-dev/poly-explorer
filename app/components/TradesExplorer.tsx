@@ -1103,6 +1103,18 @@ export default function TradesExplorer({
       {/* LEVEL 6: TRADES TABLE LOG */}
       {viewLevel === "trades" && (
         <div className="space-y-4">
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => navigateToLevel("slots")}
+              className="text-xs text-accent hover:underline cursor-pointer font-medium"
+            >
+              ← Back
+            </button>
+            <h3 className="text-xs font-bold uppercase tracking-wider text-muted select-none">
+              Trades Log for {selectedSlot?.label}
+            </h3>
+          </div>
+
           <div className="flex items-center justify-between border-t border-border pt-4">
             <span className="text-xs text-muted select-none">
               Page {currentPage} of {totalPages} (showing {activeDetailTrades.length} trades in slot)
